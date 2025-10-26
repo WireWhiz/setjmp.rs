@@ -7,6 +7,7 @@ use std::ffi::{CStr, CString};
 use std::fs::{remove_file, File};
 use std::io::Write;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use clang_sys::*;
 
@@ -51,7 +52,8 @@ fn main() {
     // write out a rust file containing declarations including link
     // names that point to the correct libc symbols found above
     let mut file = File::create(out_path.join("decls.rs")).unwrap();
-    file.write_all(&decls_contents(symbols)).unwrap();
+    file.write_all(&decls_contents(c_file_path.to_str().unwrap(), symbols))
+        .unwrap();
 }
 
 // Parse the given C file with libclang, extracting the symbols from
@@ -62,11 +64,35 @@ fn find_symbols(filename: &PathBuf) -> Vec<String> {
     unsafe {
         let filename_cstr = CString::new(filename.to_str().unwrap()).unwrap();
         let index = clang_createIndex(0, 0);
+        let target = std::env::var("TARGET").unwrap();
+        let mut args = vec![CString::from_str(&format!("--target={}", target)).unwrap()];
+        if let Ok(extra) = std::env::var("BINDGEN_EXTRA_CLANG_ARGS") {
+            args.extend(
+                extra
+                    .split_whitespace()
+                    .map(|a| CString::from_str(a).unwrap()),
+            );
+        }
+        let target_extra_args = format!("BINDGEN_EXTRA_CLANG_ARGS_{}", target.replace("-", "_"));
+        println!(
+            "cargo:warning=Checking for args in: {:?}",
+            target_extra_args
+        );
+        if let Ok(extra) = std::env::var(target_extra_args) {
+            println!("cargo:warning=Found extra args: {:?}", extra);
+            args.extend(
+                extra
+                    .split_whitespace()
+                    .map(|a| CString::from_str(a).unwrap()),
+            );
+        }
+        println!("cargo:warning=Running clang parse with args: {:?}", args);
+        let arg_ptrs = args.iter().map(|a| a.as_ptr()).collect::<Vec<_>>();
         let tu = clang_parseTranslationUnit(
             index,
             filename_cstr.as_ptr(),
-            std::ptr::null_mut(),
-            0,
+            arg_ptrs.as_ptr(),
+            args.len() as i32,
             std::ptr::null_mut(),
             0,
             CXTranslationUnit_None,
@@ -128,9 +154,10 @@ int find_symbols()
 // The contents of the function declarations for setjmp, etc. The
 // order of declarations must match the order of calls in
 // c_contents().
-fn decls_contents(symbols: Vec<String>) -> Vec<u8> {
+fn decls_contents(source: &str, symbols: Vec<String>) -> Vec<u8> {
     return format!(
         r###"
+        // Extracted from: {}
 extern "C" {{
     #[link_name="{}"]
     pub fn setjmp(env: *mut jmp_buf) -> c_int;
@@ -142,7 +169,7 @@ extern "C" {{
     pub fn siglongjmp(env: *mut sigjmp_buf, val: c_int) -> !;
 }}
 "###,
-        symbols[0], symbols[1], symbols[2], symbols[3]
+        source, symbols[0], symbols[1], symbols[2], symbols[3]
     )
     .as_bytes()
     .to_vec();
