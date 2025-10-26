@@ -24,6 +24,7 @@ fn main() {
         .whitelist_type("jmp_buf")
         .whitelist_type("sigjmp_buf")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks))
+        .clang_arg(format!("--target={}", std::env::var("TARGET").unwrap()))
         .generate()
         .expect("Unable to generate bindings");
 
