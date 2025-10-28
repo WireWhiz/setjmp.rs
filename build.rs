@@ -66,6 +66,7 @@ fn find_symbols(filename: &PathBuf) -> Vec<String> {
         let index = clang_createIndex(0, 0);
         let target = std::env::var("TARGET").unwrap();
         let mut args = vec![CString::from_str(&format!("--target={}", target)).unwrap()];
+
         if let Ok(extra) = std::env::var("BINDGEN_EXTRA_CLANG_ARGS") {
             args.extend(
                 extra
@@ -73,20 +74,16 @@ fn find_symbols(filename: &PathBuf) -> Vec<String> {
                     .map(|a| CString::from_str(a).unwrap()),
             );
         }
-        let target_extra_args = format!("BINDGEN_EXTRA_CLANG_ARGS_{}", target.replace("-", "_"));
-        println!(
-            "cargo:warning=Checking for args in: {:?}",
-            target_extra_args
-        );
-        if let Ok(extra) = std::env::var(target_extra_args) {
-            println!("cargo:warning=Found extra args: {:?}", extra);
+        if let Ok(extra) = std::env::var(format!(
+            "BINDGEN_EXTRA_CLANG_ARGS_{}",
+            target.replace("-", "_")
+        )) {
             args.extend(
                 extra
                     .split_whitespace()
                     .map(|a| CString::from_str(a).unwrap()),
             );
         }
-        println!("cargo:warning=Running clang parse with args: {:?}", args);
         let arg_ptrs = args.iter().map(|a| a.as_ptr()).collect::<Vec<_>>();
         let tu = clang_parseTranslationUnit(
             index,
